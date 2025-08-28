@@ -1,107 +1,89 @@
+import logging
+import os
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from aiogram.utils import executor
-from aiogram.dispatcher import FSMContext
-from aiogram.contrib.fsm_storage.memory import MemoryStorage
-from aiogram.dispatcher.filters.state import State, StatesGroup
-import logging
-import re
 
-BOT_TOKEN = 'YOUR_BOT_TOKEN_HERE'
-ADMIN_ID = YOUR_TELEGRAM_ID_HERE  # Replace with your ID
-
-bot = Bot(token=BOT_TOKEN)
-dp = Dispatcher(bot, storage=MemoryStorage())
 logging.basicConfig(level=logging.INFO)
 
-# Step-by-step states
-class Form(StatesGroup):
-    name = State()
-    dob = State()
-    school = State()
-    address = State()
-    photo = State()
-    confirm = State()
+TOKEN = os.getenv("BOT_TOKEN")  # from Render Environment Variables
+ADMIN_ID = os.getenv("ADMIN_ID")  # your telegram user id
 
-# Start
-@dp.message_handler(commands=['start'])
-async def start_form(message: types.Message):
-    await message.answer("👋 Hello! Let's get started.\nWhat is your full name?")
-    await Form.name.set()
+bot = Bot(token=TOKEN)
+dp = Dispatcher(bot)
 
-# Name
-@dp.message_handler(state=Form.name)
-async def get_name(message: types.Message, state: FSMContext):
-    await state.update_data(name=message.text)
-    await message.answer("📅 Enter your date of birth (YYYY-MM-DD):")
-    await Form.dob.set()
+user_data = {}
 
-# DOB Validation
-@dp.message_handler(state=Form.dob)
-async def get_dob(message: types.Message, state: FSMContext):
-    dob = message.text.strip()
-    if not re.match(r"\d{4}-\d{2}-\d{2}", dob):
-        await message.answer("❌ Invalid date format. Please enter in YYYY-MM-DD.")
+# Step 1 - Start
+@dp.message_handler(commands=["start"])
+async def start(message: types.Message):
+    user_data[message.chat.id] = {}
+    await message.answer("👋 Welcome! Let's get started.\nPlease enter your *Full Name*:")
+
+# Step 2 - Name
+@dp.message_handler(lambda message: message.chat.id in user_data and "name" not in user_data[message.chat.id])
+async def get_name(message: types.Message):
+    user_data[message.chat.id]["name"] = message.text
+    await message.answer("📅 Enter your Date of Birth (YYYY-MM-DD):")
+
+# Step 3 - DOB
+@dp.message_handler(lambda message: message.chat.id in user_data and "dob" not in user_data[message.chat.id])
+async def get_dob(message: types.Message):
+    dob = message.text
+    if len(dob.split("-")) != 3:
+        await message.answer("❌ Invalid format. Please use YYYY-MM-DD:")
         return
-    await state.update_data(dob=dob)
-    await message.answer("🏫 What's your high school name?")
-    await Form.school.set()
+    user_data[message.chat.id]["dob"] = dob
+    await message.answer("🏫 Enter your High School name:")
 
-# School
-@dp.message_handler(state=Form.school)
-async def get_school(message: types.Message, state: FSMContext):
-    await state.update_data(school=message.text)
-    await message.answer("📍 Enter your address (line 1 only):")
-    await Form.address.set()
+# Step 4 - High School
+@dp.message_handler(lambda message: message.chat.id in user_data and "school" not in user_data[message.chat.id])
+async def get_school(message: types.Message):
+    user_data[message.chat.id]["school"] = message.text
+    await message.answer("🏠 Enter your Address line 1:")
 
-# Address
-@dp.message_handler(state=Form.address)
-async def get_address(message: types.Message, state: FSMContext):
-    await state.update_data(address=message.text)
-    await message.answer("🖼️ Please send a photo of yourself:")
-    await Form.photo.set()
+# Step 5 - Address
+@dp.message_handler(lambda message: message.chat.id in user_data and "address" not in user_data[message.chat.id])
+async def get_address(message: types.Message):
+    user_data[message.chat.id]["address"] = message.text
+    await message.answer("📸 Now send your Photo:")
 
-# Photo
-@dp.message_handler(content_types=['photo'], state=Form.photo)
-async def get_photo(message: types.Message, state: FSMContext):
-    file_id = message.photo[-1].file_id
-    await state.update_data(photo=file_id)
+# Step 6 - Photo
+@dp.message_handler(content_types=["photo"])
+async def get_photo(message: types.Message):
+    if "photo" not in user_data[message.chat.id]:
+        user_data[message.chat.id]["photo"] = message.photo[-1].file_id
 
-    data = await state.get_data()
-    summary = (
-        f"📝 **Please Confirm Your Info:**\n\n"
-        f"👤 Name: {data['name']}\n"
-        f"📅 DOB: {data['dob']}\n"
-        f"🏫 School: {data['school']}\n"
-        f"📍 Address: {data['address']}\n\n"
-        f"Is this correct? ✅ Yes / ❌ No"
-    )
-    markup = ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.add(KeyboardButton("✅ Yes"), KeyboardButton("❌ No"))
-    await message.answer(summary, reply_markup=markup, parse_mode="Markdown")
-    await Form.confirm.set()
+        summary = (
+            f"✅ Please confirm your details:\n\n"
+            f"👤 Name: {user_data[message.chat.id]['name']}\n"
+            f"📅 DOB: {user_data[message.chat.id]['dob']}\n"
+            f"🏫 School: {user_data[message.chat.id]['school']}\n"
+            f"🏠 Address: {user_data[message.chat.id]['address']}\n\n"
+            f"Is this correct?"
+        )
 
-# Confirm or Correct
-@dp.message_handler(state=Form.confirm)
-async def confirm_data(message: types.Message, state: FSMContext):
+        keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
+        keyboard.add(KeyboardButton("✅ Yes"), KeyboardButton("❌ No"))
+
+        await message.answer(summary, reply_markup=keyboard)
+
+# Step 7 - Confirmation
+@dp.message_handler(lambda message: message.text in ["✅ Yes", "❌ No"])
+async def confirm(message: types.Message):
     if message.text == "✅ Yes":
-        data = await state.get_data()
-        await bot.send_message(ADMIN_ID, f"📬 New Submission:\n\n"
-                                          f"👤 Name: {data['name']}\n"
-                                          f"📅 DOB: {data['dob']}\n"
-                                          f"🏫 School: {data['school']}\n"
-                                          f"📍 Address: {data['address']}")
-        await bot.send_photo(ADMIN_ID, data['photo'])
-
+        data = user_data[message.chat.id]
+        await bot.send_message(ADMIN_ID, f"🎉 New Submission:\n\n"
+                                         f"👤 Name: {data['name']}\n"
+                                         f"📅 DOB: {data['dob']}\n"
+                                         f"🏫 School: {data['school']}\n"
+                                         f"🏠 Address: {data['address']}")
+        await bot.send_photo(ADMIN_ID, data["photo"])
         await message.answer("🎉 Thank you! Your information has been submitted.")
-        await state.finish()
-    elif message.text == "❌ No":
-        await message.answer("📝 Which part do you want to correct? (Name, DOB, School, Address)")
-        # Optional: implement specific correction logic
-        await state.finish()
+        del user_data[message.chat.id]
     else:
-        await message.answer("Please reply with ✅ Yes or ❌ No")
+        user_data[message.chat.id] = {}
+        await message.answer("❌ Let's try again. Please enter your *Full Name*:")
 
-# Run bot
-if __name__ == '__main__':
+if __name__ == "__main__":
     executor.start_polling(dp, skip_updates=True)
