@@ -9,6 +9,13 @@ logging.basicConfig(level=logging.INFO)
 TOKEN = os.getenv("BOT_TOKEN")  # from Render Environment Variables
 ADMIN_ID = os.getenv("ADMIN_ID")  # your telegram user id
 
+# 👈 ADDED: Check env vars so you don’t get silent errors
+if not TOKEN or not ADMIN_ID:
+    raise RuntimeError(
+        "BOT_TOKEN and ADMIN_ID must be set in Render Environment Variables.\n"
+        "Go to Render dashboard > Your Service > Environment, and add them."
+    )
+
 bot = Bot(token=TOKEN)
 dp = Dispatcher(bot)
 
@@ -73,11 +80,14 @@ async def get_photo(message: types.Message):
 async def confirm(message: types.Message):
     if message.text == "✅ Yes":
         data = user_data[message.chat.id]
-        await bot.send_message(ADMIN_ID, f"🎉 New Submission:\n\n"
-                                         f"👤 Name: {data['name']}\n"
-                                         f"📅 DOB: {data['dob']}\n"
-                                         f"🏫 School: {data['school']}\n"
-                                         f"🏠 Address: {data['address']}")
+        await bot.send_message(
+            ADMIN_ID,
+            f"🎉 New Submission:\n\n"
+            f"👤 Name: {data['name']}\n"
+            f"📅 DOB: {data['dob']}\n"
+            f"🏫 School: {data['school']}\n"
+            f"🏠 Address: {data['address']}"
+        )
         await bot.send_photo(ADMIN_ID, data["photo"])
         await message.answer("🎉 Thank you! Your information has been submitted.")
         del user_data[message.chat.id]
